@@ -157,6 +157,15 @@ def create_app(local_timezone: str | None = None) -> Starlette:
                 await response(scope, receive, send)
                 return
             
+            # Handle notifications/initialized (notification, not a request)
+            elif json_data.get("method") == "notifications/initialized":
+                # This is a notification, not a request, so no response body needed
+                # Just acknowledge with 202 Accepted
+                from starlette.responses import Response
+                response = Response(status_code=202)
+                await response(scope, receive, send)
+                return
+            
             # Handle tools/list request
             elif json_data.get("method") == "tools/list":
                 # Return the tools list manually since we know what they are
