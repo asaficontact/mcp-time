@@ -122,14 +122,60 @@ def create_app(local_timezone: str | None = None) -> Starlette:
 
     # Create a simple ASGI app that routes requests
     async def app(scope: dict, receive: Any, send: Any) -> None:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if scope["type"] == "http":
             path = scope["path"]
             method = scope["method"]
+            
+            logger.info(f"HTTP request: {method} {path}")
             
             if path == "/mcp" and method == "GET":
                 await handle_mcp_sse(scope, receive, send)
             elif path == "/messages" and method == "POST":
                 await handle_post_messages(scope, receive, send)
+            elif path == "/" or path == "/health":
+                # Health check endpoint
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        [b"content-type", b"application/json"],
+                        [b"cache-control", b"no-cache"],
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps({
+                        "status": "ok",
+                        "server": "mcp-time",
+                        "version": "0.6.2",
+                        "mcp_endpoint": "/mcp"
+                    }).encode(),
+                })
+            elif path == "/.well-known/mcp-config":
+                # MCP configuration endpoint for Smithery discovery
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [
+                        [b"content-type", b"application/json"],
+                        [b"cache-control", b"no-cache"],
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps({
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "$id": "https://mcp-time/.well-known/mcp-config",
+                        "title": "MCP Time Server Configuration",
+                        "description": "Configuration for MCP Time Server (no configuration required)",
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False
+                    }).encode(),
+                })
             else:
                 # 404 Not Found
                 await send({
@@ -143,11 +189,14 @@ def create_app(local_timezone: str | None = None) -> Starlette:
                 })
         elif scope["type"] == "lifespan":
             # Handle lifespan events
+            logger.info("Handling lifespan event")
             while True:
                 message = await receive()
                 if message["type"] == "lifespan.startup":
+                    logger.info("Application startup")
                     await send({"type": "lifespan.startup.complete"})
                 elif message["type"] == "lifespan.shutdown":
+                    logger.info("Application shutdown")
                     await send({"type": "lifespan.shutdown.complete"})
                     return
     
@@ -158,6 +207,14 @@ def main():
     """Run the HTTP server"""
     import argparse
     import uvicorn
+    import logging
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
 
     parser = argparse.ArgumentParser(
         description="MCP Time Server - HTTP/SSE version"
@@ -171,9 +228,19 @@ def main():
     # Get port from environment variable (for Smithery) or command line
     port = int(os.environ.get("PORT", args.port))
     
+    logger.info(f"Starting MCP Time Server on {args.host}:{port}")
+    logger.info(f"Local timezone: {args.local_timezone or 'auto-detect'}")
+    logger.info(f"MCP endpoint: http://{args.host}:{port}/mcp")
+    
     app = create_app(args.local_timezone)
     
-    uvicorn.run(app, host=args.host, port=port)
+    uvicorn.run(
+        app, 
+        host=args.host, 
+        port=port,
+        log_level="info",
+        access_log=True
+    )
 
 
 if __name__ == "__main__":
