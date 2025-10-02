@@ -117,8 +117,124 @@ def create_app(local_timezone: str | None = None) -> Starlette:
                 logging.error(f"Error in MCP session: {e}")
     
     async def handle_post_messages(scope: dict, receive: Any, send: Any) -> None:
-        """Handle POST messages to /messages"""
+        """Handle POST messages to /messages (with session)"""
         await sse_transport.handle_post_message(scope, receive, send)
+    
+    async def handle_direct_post(scope: dict, receive: Any, send: Any) -> None:
+        """Handle direct POST to /mcp without session (for scanners)"""
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        request = Request(scope, receive)
+        
+        try:
+            # Parse the JSON-RPC request
+            json_data = await request.json()
+            logger.info(f"Direct POST request: {json_data}")
+            
+            # Handle initialize request
+            if json_data.get("method") == "initialize":
+                response_data = {
+                    "jsonrpc": "2.0",
+                    "id": json_data.get("id"),
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {
+                            "experimental": {},
+                            "tools": {
+                                "listChanged": False
+                            }
+                        },
+                        "serverInfo": {
+                            "name": "mcp-time",
+                            "version": "1.0.0"
+                        }
+                    }
+                }
+                response = JSONResponse(response_data)
+                await response(scope, receive, send)
+                return
+            
+            # Handle tools/list request
+            elif json_data.get("method") == "tools/list":
+                # Return the tools list manually since we know what they are
+                tools_list = [
+                    {
+                        "name": "get_current_time",
+                        "description": "Get current time in a specific timezones",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "timezone": {
+                                    "type": "string",
+                                    "description": f"IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use '{local_tz}' as local timezone if no timezone provided by the user."
+                                }
+                            },
+                            "required": ["timezone"]
+                        }
+                    },
+                    {
+                        "name": "convert_time",
+                        "description": "Convert time between timezones",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "source_timezone": {
+                                    "type": "string",
+                                    "description": f"Source IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use '{local_tz}' as local timezone if no source timezone provided by the user."
+                                },
+                                "time": {
+                                    "type": "string",
+                                    "description": "Time to convert in 24-hour format (HH:MM)"
+                                },
+                                "target_timezone": {
+                                    "type": "string",
+                                    "description": f"Target IANA timezone name (e.g., 'Asia/Tokyo', 'America/San_Francisco'). Use '{local_tz}' as local timezone if no target timezone provided by the user."
+                                }
+                            },
+                            "required": ["source_timezone", "time", "target_timezone"]
+                        }
+                    }
+                ]
+                response_data = {
+                    "jsonrpc": "2.0",
+                    "id": json_data.get("id"),
+                    "result": {
+                        "tools": tools_list
+                    }
+                }
+                response = JSONResponse(response_data)
+                await response(scope, receive, send)
+                return
+            
+            # Handle other methods
+            else:
+                response_data = {
+                    "jsonrpc": "2.0",
+                    "id": json_data.get("id"),
+                    "error": {
+                        "code": -32601,
+                        "message": f"Method not found: {json_data.get('method')}"
+                    }
+                }
+                response = JSONResponse(response_data, status_code=400)
+                await response(scope, receive, send)
+                return
+                
+        except Exception as e:
+            logger.error(f"Error handling direct POST: {e}")
+            response_data = {
+                "jsonrpc": "2.0",
+                "id": json_data.get("id") if 'json_data' in locals() else None,
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                }
+            }
+            response = JSONResponse(response_data, status_code=500)
+            await response(scope, receive, send)
 
     # Create a simple ASGI app that routes requests
     async def app(scope: dict, receive: Any, send: Any) -> None:
@@ -131,8 +247,13 @@ def create_app(local_timezone: str | None = None) -> Starlette:
             
             logger.info(f"HTTP request: {method} {path}")
             
-            if path == "/mcp" and method == "GET":
-                await handle_mcp_sse(scope, receive, send)
+            if path == "/mcp":
+                if method == "GET":
+                    # SSE connection
+                    await handle_mcp_sse(scope, receive, send)
+                elif method == "POST":
+                    # Direct POST (for Smithery scanner and direct clients)
+                    await handle_direct_post(scope, receive, send)
             elif path == "/messages" and method == "POST":
                 await handle_post_messages(scope, receive, send)
             elif path == "/" or path == "/health":
