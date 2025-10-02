@@ -20,11 +20,14 @@ dependencies = [
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
     "tzdata>=2024.2",
-    "tzlocal>=5.3.1"
+    "tzlocal>=5.3.1",
+    "starlette>=0.27.0",
+    "uvicorn>=0.24.0"
 ]
 
 [project.scripts]
 mcp-server-time = "mcp_server_time:main"
+mcp-server-time-http = "mcp_server_time.http_server:main"
 
 [build-system]
 requires = ["hatchling"]

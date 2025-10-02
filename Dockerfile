@@ -35,5 +35,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Set the LOCAL_TIMEZONE environment variable
 ENV LOCAL_TIMEZONE=${LOCAL_TIMEZONE:-"UTC"}
 
-# when running the container, add --local-timezone and a bind mount to the host's db file
-ENTRYPOINT ["mcp-server-time", "--local-timezone", "${LOCAL_TIMEZONE}"]
+# Expose the port for HTTP server
+EXPOSE 8000
+
+# Use the HTTP server for Smithery deployment
+CMD ["mcp-server-time-http"]
