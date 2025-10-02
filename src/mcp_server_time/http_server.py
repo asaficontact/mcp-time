@@ -166,6 +166,51 @@ def create_app(local_timezone: str | None = None) -> Starlette:
                 await response(scope, receive, send)
                 return
             
+            # Handle notifications/cancelled (notification, not a request)
+            elif json_data.get("method") == "notifications/cancelled":
+                # Acknowledge cancellation notification
+                from starlette.responses import Response
+                response = Response(status_code=202)
+                await response(scope, receive, send)
+                return
+            
+            # Handle ping (heartbeat)
+            elif json_data.get("method") == "ping":
+                response_data = {
+                    "jsonrpc": "2.0",
+                    "id": json_data.get("id"),
+                    "result": {}
+                }
+                response = JSONResponse(response_data)
+                await response(scope, receive, send)
+                return
+            
+            # Handle prompts/list (return empty list)
+            elif json_data.get("method") == "prompts/list":
+                response_data = {
+                    "jsonrpc": "2.0",
+                    "id": json_data.get("id"),
+                    "result": {
+                        "prompts": []
+                    }
+                }
+                response = JSONResponse(response_data)
+                await response(scope, receive, send)
+                return
+            
+            # Handle resources/list (return empty list)
+            elif json_data.get("method") == "resources/list":
+                response_data = {
+                    "jsonrpc": "2.0",
+                    "id": json_data.get("id"),
+                    "result": {
+                        "resources": []
+                    }
+                }
+                response = JSONResponse(response_data)
+                await response(scope, receive, send)
+                return
+            
             # Handle tools/list request
             elif json_data.get("method") == "tools/list":
                 # Return the tools list manually since we know what they are
