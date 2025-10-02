@@ -218,6 +218,78 @@ def create_app(local_timezone: str | None = None) -> Starlette:
                 await response(scope, receive, send)
                 return
             
+            # Handle tools/call request (execute a tool)
+            elif json_data.get("method") == "tools/call":
+                params = json_data.get("params", {})
+                tool_name = params.get("name")
+                arguments = params.get("arguments", {})
+                
+                logger.info(f"Tool call: {tool_name} with args: {arguments}")
+                
+                try:
+                    if tool_name == "get_current_time":
+                        timezone = arguments.get("timezone")
+                        if not timezone:
+                            raise ValueError("Missing required argument: timezone")
+                        
+                        result = time_server.get_current_time(timezone)
+                        
+                        response_data = {
+                            "jsonrpc": "2.0",
+                            "id": json_data.get("id"),
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": json.dumps(result.model_dump(), indent=2)
+                                    }
+                                ]
+                            }
+                        }
+                        
+                    elif tool_name == "convert_time":
+                        source_timezone = arguments.get("source_timezone")
+                        time_str = arguments.get("time")
+                        target_timezone = arguments.get("target_timezone")
+                        
+                        if not all([source_timezone, time_str, target_timezone]):
+                            raise ValueError("Missing required arguments")
+                        
+                        result = time_server.convert_time(source_timezone, time_str, target_timezone)
+                        
+                        response_data = {
+                            "jsonrpc": "2.0",
+                            "id": json_data.get("id"),
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": json.dumps(result.model_dump(), indent=2)
+                                    }
+                                ]
+                            }
+                        }
+                    else:
+                        raise ValueError(f"Unknown tool: {tool_name}")
+                    
+                    response = JSONResponse(response_data)
+                    await response(scope, receive, send)
+                    return
+                    
+                except Exception as e:
+                    logger.error(f"Error executing tool {tool_name}: {e}")
+                    response_data = {
+                        "jsonrpc": "2.0",
+                        "id": json_data.get("id"),
+                        "error": {
+                            "code": -32603,
+                            "message": f"Error executing tool: {str(e)}"
+                        }
+                    }
+                    response = JSONResponse(response_data, status_code=500)
+                    await response(scope, receive, send)
+                    return
+            
             # Handle other methods
             else:
                 response_data = {
