@@ -1,4 +1,10 @@
-version: 1
-start:
-  command: ["mcp-server-time"]
+startCommand:
+  type: stdio
+  configSchema: {}
+  commandFunction: |-
+    (config) => ({
+      command: "mcp-server-time",
+      args: [],
+      env: {}
+    })
 
