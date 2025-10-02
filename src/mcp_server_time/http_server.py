@@ -105,34 +105,31 @@ def create_app(local_timezone: str | None = None) -> Starlette:
     # Using /messages as the message endpoint
     sse_transport = SseServerTransport("/messages")
     
-    async def mcp_app(scope: dict, receive: Any, send: Any) -> None:
-        """Raw ASGI app for MCP endpoint"""
-        if scope["type"] != "http":
-            return
-        
-        if scope["method"] == "GET":
-            # SSE connection - run the server with this transport
-            async with sse_transport.connect_sse(scope, receive, send) as streams:
-                await server.run(
-                    streams[0], streams[1], server.create_initialization_options()
-                )
-        elif scope["method"] == "POST":
-            # POST message
-            await sse_transport.handle_post_message(scope, receive, send)
+    async def handle_mcp_sse(scope: dict, receive: Any, send: Any) -> None:
+        """Handle SSE connection for MCP"""
+        async with sse_transport.connect_sse(scope, receive, send) as (read_stream, write_stream):
+            init_options = server.create_initialization_options()
+            try:
+                await server.run(read_stream, write_stream, init_options)
+            except Exception as e:
+                # Log but don't crash - client might have disconnected
+                import logging
+                logging.error(f"Error in MCP session: {e}")
     
-    async def messages_endpoint(scope: dict, receive: Any, send: Any) -> None:
+    async def handle_post_messages(scope: dict, receive: Any, send: Any) -> None:
         """Handle POST messages to /messages"""
-        if scope["type"] == "http" and scope["method"] == "POST":
-            await sse_transport.handle_post_message(scope, receive, send)
+        await sse_transport.handle_post_message(scope, receive, send)
 
     # Create a simple ASGI app that routes requests
     async def app(scope: dict, receive: Any, send: Any) -> None:
         if scope["type"] == "http":
             path = scope["path"]
-            if path == "/mcp":
-                await mcp_app(scope, receive, send)
-            elif path == "/messages":
-                await messages_endpoint(scope, receive, send)
+            method = scope["method"]
+            
+            if path == "/mcp" and method == "GET":
+                await handle_mcp_sse(scope, receive, send)
+            elif path == "/messages" and method == "POST":
+                await handle_post_messages(scope, receive, send)
             else:
                 # 404 Not Found
                 await send({
@@ -144,6 +141,15 @@ def create_app(local_timezone: str | None = None) -> Starlette:
                     "type": "http.response.body",
                     "body": b"Not Found",
                 })
+        elif scope["type"] == "lifespan":
+            # Handle lifespan events
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
     
     return app
 
