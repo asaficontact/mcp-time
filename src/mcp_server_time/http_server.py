@@ -8,7 +8,7 @@ from mcp.server.sse import SseServerTransport
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import Response
-from starlette.routing import Route
+from starlette.routing import Route, Mount
 
 from .server import TimeServer, TimeTools, get_local_tz
 from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
@@ -101,30 +101,50 @@ def create_app(local_timezone: str | None = None) -> Starlette:
         except Exception as e:
             raise ValueError(f"Error processing mcp-server-time query: {str(e)}")
 
-    # Create SSE transport and connect server
-    # Using /mcp/messages as the message endpoint
-    sse_transport = SseServerTransport("/mcp/messages")
+    # Create SSE transport
+    # Using /messages as the message endpoint
+    sse_transport = SseServerTransport("/messages")
     
-    async def startup():
-        """Connect the server to the transport on startup"""
-        await server.connect(sse_transport)
-    
-    async def handle_mcp(scope: dict, receive: Any, send: Any) -> None:
-        """Handle MCP requests (both GET for SSE and POST for messages)"""
+    async def mcp_app(scope: dict, receive: Any, send: Any) -> None:
+        """Raw ASGI app for MCP endpoint"""
+        if scope["type"] != "http":
+            return
+        
         if scope["method"] == "GET":
-            # SSE connection
-            await sse_transport.connect_sse(scope, receive, send)
+            # SSE connection - run the server with this transport
+            async with sse_transport.connect_sse(scope, receive, send) as streams:
+                await server.run(
+                    streams[0], streams[1], server.create_initialization_options()
+                )
         elif scope["method"] == "POST":
             # POST message
             await sse_transport.handle_post_message(scope, receive, send)
+    
+    async def messages_endpoint(scope: dict, receive: Any, send: Any) -> None:
+        """Handle POST messages to /messages"""
+        if scope["type"] == "http" and scope["method"] == "POST":
+            await sse_transport.handle_post_message(scope, receive, send)
 
-    # Create routes - using raw ASGI endpoint for /mcp
-    routes = [
-        Route("/mcp", endpoint=handle_mcp, methods=["GET", "POST"]),
-        Route("/mcp/messages", endpoint=lambda scope, receive, send: sse_transport.handle_post_message(scope, receive, send), methods=["POST"]),
-    ]
-
-    app = Starlette(routes=routes, on_startup=[startup])
+    # Create a simple ASGI app that routes requests
+    async def app(scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            path = scope["path"]
+            if path == "/mcp":
+                await mcp_app(scope, receive, send)
+            elif path == "/messages":
+                await messages_endpoint(scope, receive, send)
+            else:
+                # 404 Not Found
+                await send({
+                    "type": "http.response.start",
+                    "status": 404,
+                    "headers": [[b"content-type", b"text/plain"]],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": b"Not Found",
+                })
+    
     return app
 
 
