@@ -2,6 +2,10 @@
 
 A Model Context Protocol server that provides time and timezone conversion capabilities. This server enables LLMs to get current time information and perform timezone conversions using IANA timezone names, with automatic system timezone detection.
 
+<a href="https://glama.ai/mcp/servers/@asaficontact/mcp-time">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@asaficontact/mcp-time/badge" alt="Time Server MCP server" />
+</a>
+
 ### Available Tools
 
 - `get_current_time` - Get current time in a specific timezone or system timezone.
